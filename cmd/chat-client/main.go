@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net"
-	"time"
+	"os"
 )
 
 const maxBuffSize = 128
+const peerAddress = "localhost:3456"
 
 func main() {
 	printWelcome()
+
+	go Send()
 
 	addr, err := net.ResolveUDPAddr("udp", ":2345")
 	if err != nil {
@@ -32,11 +36,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("Received %s from %s \n", string(buf[:size]), addr)
-		_, err = ln.WriteToUDP([]byte(time.Now().String()), addr)
-		if err != nil {
-			log.Fatal(err)
-		}
+		log.Printf("%s: %s \n", addr, string(buf[:size]))
 	}
 
 }
@@ -46,4 +46,30 @@ func printWelcome() {
 	fmt.Println("                               Welcome to Chat 3000!                                  ")
 	fmt.Println("######################################################################################")
 	log.Println("Starting Listener on Port 2345...")
+}
+
+func Send() {
+	addr, err := net.ResolveUDPAddr("udp", peerAddress)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer conn.Close()
+	for {
+		log.Print("Send: ")
+		input, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		_, err = conn.Write([]byte(input))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 }
