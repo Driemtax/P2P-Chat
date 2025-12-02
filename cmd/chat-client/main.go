@@ -9,14 +9,15 @@ import (
 )
 
 const maxBuffSize = 128
-const peerAddress = "localhost:3456"
+const peerAddress = "localhost:10234"
+const port = ":2345"
 
 func main() {
 	printWelcome()
 
 	go Send()
 
-	addr, err := net.ResolveUDPAddr("udp", ":2345")
+	addr, err := net.ResolveUDPAddr("udp", port)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -45,7 +46,7 @@ func printWelcome() {
 	fmt.Println("######################################################################################")
 	fmt.Println("                               Welcome to Chat 3000!                                  ")
 	fmt.Println("######################################################################################")
-	log.Println("Starting Listener on Port 2345...")
+	log.Println("Starting Listener on Port 10234...")
 }
 
 func Send() {
@@ -61,11 +62,12 @@ func Send() {
 
 	defer conn.Close()
 	for {
-		log.Print("Send: ")
 		input, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		log.Println("You:", input)
 
 		_, err = conn.Write([]byte(input))
 		if err != nil {
