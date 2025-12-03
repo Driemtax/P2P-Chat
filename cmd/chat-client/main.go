@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -9,15 +10,15 @@ import (
 )
 
 const maxBuffSize = 128
-const peerAddress = "localhost:10234"
-const port = ":2345"
 
 func main() {
 	printWelcome()
+	host, peer := parseCMD()
+	fmt.Println("Connecting to:", host, peer)
 
-	go Send()
+	go Send(peer)
 
-	addr, err := net.ResolveUDPAddr("udp", port)
+	addr, err := net.ResolveUDPAddr("udp", host)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,11 +47,21 @@ func printWelcome() {
 	fmt.Println("######################################################################################")
 	fmt.Println("                               Welcome to Chat 3000!                                  ")
 	fmt.Println("######################################################################################")
-	log.Println("Starting Listener on Port 10234...")
+	log.Println("Initialize Listener...")
 }
 
-func Send() {
-	addr, err := net.ResolveUDPAddr("udp", peerAddress)
+func parseCMD() (string, string) {
+	host := flag.String("port", "8080", "the port you want to listen on..")
+	peer := flag.String("peer", "localhost:3000", "full remote address of the peer you want to connect to. <IP>:<PORT>")
+
+	flag.Parse()
+	port := ":" + *host
+
+	return port, *peer
+}
+
+func Send(peer string) {
+	addr, err := net.ResolveUDPAddr("udp", peer)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,8 +77,6 @@ func Send() {
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		log.Println("You:", input)
 
 		_, err = conn.Write([]byte(input))
 		if err != nil {
