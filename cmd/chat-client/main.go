@@ -7,9 +7,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 )
 
 const maxBuffSize = 128
+
+var globalCache []byte = make([]byte, maxBuffSize)
 
 func main() {
 	printWelcome()
@@ -44,6 +47,7 @@ func parseCMD() (string, string) {
 	return port, *peer
 }
 
+// Reiceves a message via udp. Listens on the port specified in host. Printet message is capped to maxBuffSize
 func Reiceve(host string) {
 	addr, err := net.ResolveUDPAddr("udp", host)
 	if err != nil {
@@ -67,17 +71,32 @@ func Reiceve(host string) {
 			log.Fatal(err)
 		}
 
+		// 1. tempo save the current input buffer
+		//_, err = os.Stdin.ReadAt(globalCache, 0)
+		//if err != nil {
+		//	log.Fatal(err)
+		//}
+		// 2. Delete input
+		//fmt.Printf("\r\033[K") // Deletes current row and jumps to next one
+		// 3. print reiceved message
 		log.Printf("%s: %s", addr, string(buf[:size]))
+		// 4. reprint input buffer to continue typing
+		//_, err = os.Stdin.WriteAt(globalCache, 0)
+		//if err != nil {
+		//	log.Fatal(err)
+		//}
 	}
 
 }
 
+// Send sends the Stdin Buffer to the configured udp address (<IP>:<PORT>)
 func Send(peer string) {
 	addr, err := net.ResolveUDPAddr("udp", peer)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Open a socket for sending (random empty socket is chosen cause of laddr=nil)
 	conn, err := net.DialUDP("udp", nil, addr)
 	if err != nil {
 		log.Fatal(err)
@@ -85,6 +104,8 @@ func Send(peer string) {
 
 	defer conn.Close()
 	for {
+		timestamp := time.Now().Format("2006/01/02 15:04:05")
+		fmt.Printf("%s You: ", timestamp)
 		input, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Fatal(err)
@@ -92,7 +113,7 @@ func Send(peer string) {
 
 		_, err = conn.Write([]byte(input))
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
 		}
 	}
 }
