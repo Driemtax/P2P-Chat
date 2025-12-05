@@ -8,6 +8,11 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/widget"
 )
 
 const maxBuffSize = 128
@@ -21,13 +26,107 @@ func main() {
 	peers := make([]string, 10)
 	peers[0] = peer
 
-	go Send(peer)
-	go Reiceve(host)
+	a := app.New()
+	window := a.NewWindow("Chat 3000")
 
-	for {
+	// Chat history widget
+	chatHistory := binding.NewString()
+	chatHistory.Set("Willkommen im Chat\n")
 
-	}
+	history := widget.NewLabelWithData(chatHistory)
 
+	// Input text field
+	input := widget.NewEntry()
+	input.PlaceHolder = "Nachricht tippen..."
+
+	// Create a channel for communcation between send routine and ui thread
+	sendChan := make(chan string, 10)
+
+	// Send-Button
+	send := widget.NewButton("Senden", func() {
+		msg := input.Text
+		if msg != "" {
+			sendChan <- msg
+			timestamp := time.Now().Format("2006/01/02 15:04:05")
+			chatLog, _ := chatHistory.Get()
+			chatHistory.Set(chatLog + "\n" + timestamp + " You: " + msg + "\n")
+			input.SetText("")
+		}
+	})
+
+	content := container.NewVBox(
+		history,
+		input,
+		send,
+	)
+
+	// GO routine for sending a message
+	go func(peer string) {
+		addr, err := net.ResolveUDPAddr("udp", peer)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Open a socket for sending (random empty socket is chosen cause of laddr=nil)
+		conn, err := net.DialUDP("udp", nil, addr)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer conn.Close()
+		for msg := range sendChan {
+			// directly send the message as a byte array via udp
+			_, err = conn.Write([]byte(msg))
+			if err != nil {
+				timestamp := time.Now().Format("2006/01/02 15:04:05")
+				chatLog, _ := chatHistory.Get()
+				errMsg := fmt.Sprintf("\n%s [System]: Konnte Nachricht nicht senden (Empfänger offline?): %v", timestamp, err)
+				newLog := chatLog + errMsg
+				chatHistory.Set(newLog)
+				log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
+
+			}
+		}
+	}(peer)
+
+	// GO routine for reiceving a message
+	go func(host string) {
+		addr, err := net.ResolveUDPAddr("udp", host)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer conn.Close()
+		chatLog, _ := chatHistory.Get()
+		timestamp := time.Now().Format("2006/01/02 15:04:05")
+		newLog := chatLog + timestamp + " System: Now Listening on Port " + host + "\n"
+		chatHistory.Set(newLog)
+
+		buf := make([]byte, maxBuffSize)
+		for {
+			// Read for new messages
+			// This is a blocking function call, so it waits till a new message arrives at the port
+			size, addr, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Print it to the chat widget
+			chatLog, _ = chatHistory.Get()
+			timestamp = time.Now().Format("2006/01/02 15:04:05")
+			msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, addr.String(), string(buf[:size]))
+			newLog := chatLog + msg
+			chatHistory.Set(newLog)
+		}
+	}(host)
+
+	window.SetContent(content)
+	window.ShowAndRun()
 }
 
 func printWelcome() {
@@ -71,20 +170,8 @@ func Reiceve(host string) {
 			log.Fatal(err)
 		}
 
-		// 1. tempo save the current input buffer
-		//_, err = os.Stdin.ReadAt(globalCache, 0)
-		//if err != nil {
-		//	log.Fatal(err)
-		//}
-		// 2. Delete input
-		//fmt.Printf("\r\033[K") // Deletes current row and jumps to next one
-		// 3. print reiceved message
-		log.Printf("%s: %s", addr, string(buf[:size]))
-		// 4. reprint input buffer to continue typing
-		//_, err = os.Stdin.WriteAt(globalCache, 0)
-		//if err != nil {
-		//	log.Fatal(err)
-		//}
+		// Print it to the chat widget
+		log.Printf("%s: %s\n", addr, string(buf[:size]))
 	}
 
 }
