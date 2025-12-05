@@ -42,8 +42,7 @@ func main() {
 	// Create a channel for communcation between send routine and ui thread
 	sendChan := make(chan string, 10)
 
-	// Send-Button
-	send := widget.NewButton("Senden", func() {
+	onSend := func() {
 		msg := input.Text
 		if msg != "" {
 			sendChan <- msg
@@ -52,7 +51,14 @@ func main() {
 			chatHistory.Set(chatLog + "\n" + timestamp + " You: " + msg + "\n")
 			input.SetText("")
 		}
-	})
+	}
+
+	input.OnSubmitted = func(s string) {
+		onSend()
+	}
+
+	// Send-Button
+	send := widget.NewButton("Senden", onSend)
 
 	content := container.NewVBox(
 		history,
