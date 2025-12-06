@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"time"
 
 	"chat-client/internal"
@@ -19,14 +17,23 @@ import (
 
 const maxBuffSize = 128
 
-var globalCache []byte = make([]byte, maxBuffSize)
+var globalPort string = "9000"
 
 func main() {
 	printWelcome()
-	host, peer := parseCMD()
-	fmt.Println("Connecting to:", host, peer)
-	peers := []net.UDPAddr{}
-	internal.AddPeer(peers, peer)
+	globalPort, peer := parseCMD()
+	peers := &internal.Peers{}
+	peers.Add(peer)
+
+	// We open a global port for sending and receiving messages. This is a threadsafe operation.
+	addr, err := net.ResolveUDPAddr("udp", globalPort)
+	if err != nil {
+		log.Fatal(err)
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	a := app.New()
 	window := a.NewWindow("Chat 3000")
@@ -69,22 +76,11 @@ func main() {
 	)
 
 	// GO routine for sending a message
-	go func(peer string) {
-		addr, err := net.ResolveUDPAddr("udp", peer)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Open a socket for sending (random empty socket is chosen cause of laddr=nil)
-		conn, err := net.DialUDP("udp", nil, addr)
-		if err != nil {
-			log.Fatal(err)
-		}
-
+	go func(peers *internal.Peers, conn *net.UDPConn) {
 		defer conn.Close()
 		for msg := range sendChan {
 			// directly send the message as a byte array via udp
-			_, err = conn.Write([]byte(msg))
+			err = peers.Broadcast(conn, msg)
 			if err != nil {
 				timestamp := time.Now().Format("2006/01/02 15:04:05")
 				chatLog, _ := chatHistory.Get()
@@ -95,24 +91,13 @@ func main() {
 
 			}
 		}
-	}(peer)
+	}(peers, conn)
 
 	// GO routine for reiceving a message
-	go func(host string) {
-		addr, err := net.ResolveUDPAddr("udp", host)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		conn, err := net.ListenUDP("udp", addr)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		defer conn.Close()
+	go func(conn *net.UDPConn) {
 		chatLog, _ := chatHistory.Get()
 		timestamp := time.Now().Format("2006/01/02 15:04:05")
-		newLog := chatLog + timestamp + " System: Now Listening on Port " + host + "\n"
+		newLog := chatLog + timestamp + " System: Now Listening on Port " + globalPort + "\n"
 		chatHistory.Set(newLog)
 
 		buf := make([]byte, maxBuffSize)
@@ -131,7 +116,7 @@ func main() {
 			newLog := chatLog + msg
 			chatHistory.Set(newLog)
 		}
-	}(host)
+	}(conn)
 
 	window.SetContent(content)
 	window.ShowAndRun()
@@ -152,63 +137,4 @@ func parseCMD() (string, string) {
 	port := ":" + *host
 
 	return port, *peer
-}
-
-// Reiceves a message via udp. Listens on the port specified in host. Printet message is capped to maxBuffSize
-func Reiceve(host string) {
-	addr, err := net.ResolveUDPAddr("udp", host)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer conn.Close()
-	log.Println("Listening on Port", host)
-
-	buf := make([]byte, maxBuffSize)
-	for {
-		// Read for new messages
-		// This is a blocking function call, so it waits till a new message arrives at the port
-		size, addr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Print it to the chat widget
-		log.Printf("%s: %s\n", addr, string(buf[:size]))
-	}
-
-}
-
-// Send sends the Stdin Buffer to the configured udp address (<IP>:<PORT>)
-func Send(peer string) {
-	addr, err := net.ResolveUDPAddr("udp", peer)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Open a socket for sending (random empty socket is chosen cause of laddr=nil)
-	conn, err := net.DialUDP("udp", nil, addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer conn.Close()
-	for {
-		timestamp := time.Now().Format("2006/01/02 15:04:05")
-		fmt.Printf("%s You: ", timestamp)
-		input, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		_, err = conn.Write([]byte(input))
-		if err != nil {
-			log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
-		}
-	}
 }
