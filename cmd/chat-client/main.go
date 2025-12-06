@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"chat-client/internal"
+
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
@@ -23,8 +25,8 @@ func main() {
 	printWelcome()
 	host, peer := parseCMD()
 	fmt.Println("Connecting to:", host, peer)
-	peers := make([]string, 10)
-	peers[0] = peer
+	peers := []net.UDPAddr{}
+	internal.AddPeer(peers, peer)
 
 	a := app.New()
 	window := a.NewWindow("Chat 3000")
