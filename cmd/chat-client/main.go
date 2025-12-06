@@ -9,15 +9,21 @@ import (
 
 	"chat-client/internal"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/widget"
 )
 
+// Protocol config
 const maxBuffSize = 128
 
 var globalPort string = "9000"
+
+// Window config
+const width = 800
+const height = 600
 
 func main() {
 	printWelcome()
@@ -43,6 +49,13 @@ func main() {
 	chatHistory.Set("Willkommen im Chat\n")
 
 	history := widget.NewLabelWithData(chatHistory)
+	history.Wrapping = fyne.TextWrapWord
+	scrollContainer := container.NewScroll(history)
+
+	// Set new Listener to chat binding so that the scroll Container always scrolls to the bottom when chatHistory changes
+	chatHistory.AddListener(binding.NewDataListener(func() {
+		scrollContainer.ScrollToBottom()
+	}))
 
 	// Input text field
 	input := widget.NewEntry()
@@ -59,6 +72,7 @@ func main() {
 			chatLog, _ := chatHistory.Get()
 			chatHistory.Set(chatLog + "\n" + timestamp + " You: " + msg + "\n")
 			input.SetText("")
+			window.Canvas().Focus(input)
 		}
 	}
 
@@ -69,10 +83,18 @@ func main() {
 	// Send-Button
 	send := widget.NewButton("Senden", onSend)
 
-	content := container.NewVBox(
-		history,
+	// Wrap Input field and button in a container
+	inputArea := container.NewVBox(
 		input,
 		send,
+	)
+
+	content := container.NewBorder(
+		nil,             // Top
+		inputArea,       // Bottom
+		nil,             // Left
+		nil,             // Right
+		scrollContainer, // Center
 	)
 
 	// GO routine for sending a message
@@ -88,7 +110,6 @@ func main() {
 				newLog := chatLog + errMsg
 				chatHistory.Set(newLog)
 				log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
-
 			}
 		}
 	}(peers, conn)
@@ -119,6 +140,16 @@ func main() {
 	}(conn)
 
 	window.SetContent(content)
+	window.Resize(fyne.NewSize(width, height))
+	window.CenterOnScreen()
+
+	// Focus the input field on startup and when app is reopend after tabbing out
+	window.Canvas().Focus(input)
+	a.Lifecycle().SetOnEnteredForeground(func() {
+		window.Canvas().Focus(input)
+	})
+
+	// Run the app and start the infinite loop of chatting with your peerd -> you can nerver escape (except you just close the app)
 	window.ShowAndRun()
 }
 
