@@ -1,6 +1,8 @@
 package internal
 
-import "slices"
+import (
+	"net"
+)
 
 const (
 	MsgTypeHeartbeat = 0x00
@@ -8,21 +10,35 @@ const (
 	MsgTypeBroadcast = 0x02
 )
 
-func HandleMesage(message []byte) (int, string) {
-	var msgType int
-	switch message[0] {
-	case 0x00:
-		msgType = MsgTypeHeartbeat
-		// TODO: Handle heartbeat
-	case 0x01:
-		msgType = MsgTypeUnicast
-		// TODO: Handle Unicast
-	case 0x02:
-		msgType = MsgTypeBroadcast
-		// TODO: Handle Broadcast
+// HandelIncomingPacket handels all incoming packets. It decides what to do based on the message type. It needs:
+// conn: The Port for sending messages
+// peers: The list of all known active peers
+// addr: The address the messsage was sent from
+// data: the byte slice of data received
+//
+// It returns the msgType, the content of the message and any errors
+func HandleIncomingPacket(conn *net.UDPConn, peers *Peers, addr *net.UDPAddr, data []byte) (byte, string, error) {
+	if len(data) < 1 {
+		return 99, "", nil // 99 indicating empty packet
 	}
 
-	return msgType, ""
+	// First update the peer lastSeen time, since the peer is still active
+	// if we receive a msg
+	// TODO: Update lastSeen of Peer
+
+	msgType := data[0]
+	content := data[1:]
+
+	switch msgType {
+	case MsgTypeHeartbeat:
+		// TODO: Handle heartbeat
+	case MsgTypeUnicast:
+		return MsgTypeUnicast, string(content), nil
+	case MsgTypeBroadcast:
+		return MsgTypeBroadcast, string(content), nil
+	}
+
+	return msgType, string(content), nil
 }
 
 func ParseMessage(data []byte) (byte, []byte) {
@@ -44,20 +60,6 @@ func CreatePing() []byte {
 
 func CreatePong() []byte {
 	return []byte{0x00, 0x01}
-}
-
-func CreateUnicast(message string) []byte {
-	header := []byte{0x01}
-	content := []byte(message)
-	payload := slices.Concat(header, content)
-	return payload
-}
-
-func CreateBroadcast(message string) []byte {
-	header := []byte{0x02}
-	content := []byte(message)
-	payload := slices.Concat(header, content)
-	return payload
 }
 
 func HandleHeartbeat(message []byte) {

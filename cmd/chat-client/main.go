@@ -20,7 +20,7 @@ import (
 )
 
 // Protocol config
-const maxBuffSize = 128
+const maxBuffSize = 1024
 
 var globalPort string = "9000"
 
@@ -174,9 +174,9 @@ func main() {
 				log.Fatal(err)
 			}
 
-			msgType, message := internal.ParseMessage(buf[:size])
+			msgType, message, err := internal.HandleIncomingPacket(conn, peers, addr, buf[:size])
 
-			if msgType == internal.MsgTypeBroadcast {
+			if msgType == internal.MsgTypeBroadcast || msgType == internal.MsgTypeUnicast {
 				// Print it to the chat widget
 				chatLog, _ = chatHistory.Get()
 				timestamp = time.Now().Format("2006/01/02 15:04:05")
