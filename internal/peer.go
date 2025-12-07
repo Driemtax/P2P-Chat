@@ -29,7 +29,7 @@ func NewPeer(address *net.UDPAddr, alias string, status Status) *Peer {
 	}
 }
 
-func (peers *Peers) Add(peer string) error {
+func (peers *Peers) Add(peer string, alias string) error {
 	if peer == "" {
 		return errors.New("Cannot add empty peer...")
 	}
@@ -39,7 +39,11 @@ func (peers *Peers) Add(peer string) error {
 		return err
 	}
 
-	newPeer := NewPeer(addr, "", Active)
+	if alias == "" {
+		alias = peer
+	}
+
+	newPeer := NewPeer(addr, alias, Active)
 	*peers = append(*peers, *newPeer)
 
 	return nil
@@ -64,4 +68,17 @@ func (p *Peers) Broadcast(conn *net.UDPConn, msg string) error {
 	}
 
 	return err
+}
+
+// Returns the alias matching the given address if the peer is already known to the system
+// Returns the address of the peer otherwise
+func (p *Peers) GetAlias(addr *net.UDPAddr) string {
+	alias := addr.String()
+	for _, peer := range *p {
+		if peer.addr.IP.Equal(addr.IP) {
+			alias = peer.alias
+		}
+	}
+
+	return alias
 }

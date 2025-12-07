@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"chat-client/internal"
@@ -13,6 +14,8 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -27,9 +30,11 @@ const height = 600
 
 func main() {
 	printWelcome()
-	globalPort, peer := parseCMD()
+	globalPort, _ := parseCMD()
 	peers := &internal.Peers{}
-	peers.Add(peer)
+
+	// Mutex to protect the peers list from concurrent access (UI vs Send routine)
+	var peersMutex sync.Mutex
 
 	// We open a global port for sending and receiving messages. This is a threadsafe operation.
 	addr, err := net.ResolveUDPAddr("udp", globalPort)
@@ -83,6 +88,41 @@ func main() {
 	// Send-Button
 	send := widget.NewButton("Senden", onSend)
 
+	// Toolbar for adding peers
+	toolbar := widget.NewToolbar(
+		widget.NewToolbarAction(theme.ContentAddIcon(), func() {
+			// Create input field for the dialog
+			peerEntry := widget.NewEntry()
+			peerEntry.PlaceHolder = "127.0.0.1:3000"
+			aliasEntry := widget.NewEntry()
+			aliasEntry.PlaceHolder = "Gib einen Nickname ein.."
+
+			// SHow a form dialog
+			dialog.ShowForm("Neuen Peer hinzufügen", "Hinzufügen", "Abbrechen",
+				[]*widget.FormItem{
+					widget.NewFormItem("Adresse", peerEntry),
+					widget.NewFormItem("Nickname", aliasEntry),
+				},
+				func(submitted bool) {
+					if submitted && peerEntry.Text != "" {
+						// Lock before modifying peers
+						peersMutex.Lock()
+						err := peers.Add(peerEntry.Text, aliasEntry.Text)
+						peersMutex.Unlock()
+
+						if err != nil {
+							dialog.ShowError(err, window)
+						} else {
+							// Log success to chat
+							timestamp := time.Now().Format("2006/01/02 15:04:05")
+							chatLog, _ := chatHistory.Get()
+							chatHistory.Set(chatLog + "\n" + timestamp + " [System]: Peer " + peerEntry.Text + " hinzugefügt.\n")
+						}
+					}
+				}, window)
+		}),
+	)
+
 	// Wrap Input field and button in a container
 	inputArea := container.NewVBox(
 		input,
@@ -90,7 +130,7 @@ func main() {
 	)
 
 	content := container.NewBorder(
-		nil,             // Top
+		toolbar,         // Top
 		inputArea,       // Bottom
 		nil,             // Left
 		nil,             // Right
@@ -102,7 +142,9 @@ func main() {
 		defer conn.Close()
 		for msg := range sendChan {
 			// directly send the message as a byte array via udp
+			peersMutex.Lock()
 			err = peers.Broadcast(conn, msg)
+			peersMutex.Unlock()
 			if err != nil {
 				timestamp := time.Now().Format("2006/01/02 15:04:05")
 				chatLog, _ := chatHistory.Get()
@@ -133,7 +175,10 @@ func main() {
 			// Print it to the chat widget
 			chatLog, _ = chatHistory.Get()
 			timestamp = time.Now().Format("2006/01/02 15:04:05")
-			msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, addr.String(), string(buf[:size]))
+			peersMutex.Lock()
+			alias := peers.GetAlias(addr)
+			peersMutex.Unlock()
+			msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, alias, string(buf[:size]))
 			newLog := chatLog + msg
 			chatHistory.Set(newLog)
 		}
@@ -161,11 +206,16 @@ func printWelcome() {
 }
 
 func parseCMD() (string, string) {
-	host := flag.String("port", "9000", "the port you want to listen on..")
+	port := flag.String("port", "9000", "the port you want to listen on..")
 	peer := flag.String("peer", "localhost:3000", "full remote address of the peer you want to connect to. <IP>:<PORT>")
+	bind := flag.String("bind", "127.0.0.1", "IP-Adrress you want to bind to (for local testing)")
 
 	flag.Parse()
-	port := ":" + *host
+	bindAddress := ":" + *port
 
-	return port, *peer
+	if *bind != "" {
+		bindAddress = *bind + ":" + *port
+	}
+
+	return bindAddress, *peer
 }
