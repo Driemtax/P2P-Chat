@@ -50,21 +50,21 @@ func (peers *Peers) Add(peer string, alias string) error {
 }
 
 // Sends a message to a single peer using the global send socket
-func (p Peer) SendMessage(conn *net.UDPConn, msg string) error {
+func (p Peer) SendMessage(conn *net.UDPConn, payload []byte) error {
 	var err error = nil
 
 	if p.status == Active {
-		_, err = conn.WriteToUDP([]byte(msg), p.addr)
+		_, err = conn.WriteToUDP(payload, p.addr)
 	}
 
 	return err
 }
 
 // Sends the message to all known and active peers using the specified socket.
-func (p *Peers) Broadcast(conn *net.UDPConn, msg string) error {
+func (p *Peers) Broadcast(conn *net.UDPConn, payload []byte) error {
 	var err error = nil
 	for _, peer := range *p {
-		err = peer.SendMessage(conn, msg)
+		err = peer.SendMessage(conn, payload)
 	}
 
 	return err

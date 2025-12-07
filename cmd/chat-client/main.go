@@ -141,9 +141,11 @@ func main() {
 	go func(peers *internal.Peers, conn *net.UDPConn) {
 		defer conn.Close()
 		for msg := range sendChan {
+			// add the header to the message
+			payload := internal.PrepareMessage(internal.MsgTypeBroadcast, msg)
 			// directly send the message as a byte array via udp
 			peersMutex.Lock()
-			err = peers.Broadcast(conn, msg)
+			err = peers.Broadcast(conn, payload)
 			peersMutex.Unlock()
 			if err != nil {
 				timestamp := time.Now().Format("2006/01/02 15:04:05")
@@ -172,15 +174,19 @@ func main() {
 				log.Fatal(err)
 			}
 
-			// Print it to the chat widget
-			chatLog, _ = chatHistory.Get()
-			timestamp = time.Now().Format("2006/01/02 15:04:05")
-			peersMutex.Lock()
-			alias := peers.GetAlias(addr)
-			peersMutex.Unlock()
-			msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, alias, string(buf[:size]))
-			newLog := chatLog + msg
-			chatHistory.Set(newLog)
+			msgType, message := internal.ParseMessage(buf[:size])
+
+			if msgType == internal.MsgTypeBroadcast {
+				// Print it to the chat widget
+				chatLog, _ = chatHistory.Get()
+				timestamp = time.Now().Format("2006/01/02 15:04:05")
+				peersMutex.Lock()
+				alias := peers.GetAlias(addr)
+				peersMutex.Unlock()
+				msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, alias, string(message))
+				newLog := chatLog + msg
+				chatHistory.Set(newLog)
+			}
 		}
 	}(conn)
 
