@@ -214,7 +214,7 @@ func printWelcome() {
 func parseCMD() (string, string) {
 	port := flag.String("port", "9000", "the port you want to listen on..")
 	peer := flag.String("peer", "localhost:3000", "full remote address of the peer you want to connect to. <IP>:<PORT>")
-	bind := flag.String("bind", "127.0.0.1", "IP-Adrress you want to bind to (for local testing)")
+	bind := flag.String("bind", "", "IP-Adrress you want to bind to (for local testing)")
 
 	flag.Parse()
 	bindAddress := ":" + *port
