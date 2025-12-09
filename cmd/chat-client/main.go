@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"time"
 
 	"chat-client/internal"
@@ -30,17 +29,8 @@ const height = 600
 func main() {
 	printWelcome()
 	globalPort, _ := parseCMD()
-	peerManager := internal.NewPeerManager()
-
-	// We open a global port for sending and receiving messages. This is a threadsafe operation.
-	addr, err := net.ResolveUDPAddr("udp", globalPort)
-	if err != nil {
-		log.Fatal(err)
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatal(err)
-	}
+	peerManager := internal.NewPeerManager(globalPort)
+	peerManager.StartHeartbeatLoop()
 
 	a := app.New()
 	window := a.NewWindow("Chat 3000")
@@ -131,13 +121,13 @@ func main() {
 	)
 
 	// GO routine for sending a message
-	go func(peers *internal.PeerManager, conn *net.UDPConn) {
-		defer conn.Close()
+	go func(peerManager *internal.PeerManager) {
+		defer peerManager.CloseSocket()
 		for msg := range sendChan {
 			// add the header to the message
 			payload := internal.PrepareMessage(internal.MsgTypeBroadcast, msg)
 			// directly send the message as a byte array via udp
-			err = peerManager.Broadcast(conn, payload)
+			err := peerManager.Broadcast(payload)
 			if err != nil {
 				timestamp := time.Now().Format("2006/01/02 15:04:05")
 				chatLog, _ := chatHistory.Get()
@@ -147,10 +137,10 @@ func main() {
 				log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
 			}
 		}
-	}(peerManager, conn)
+	}(peerManager)
 
 	// GO routine for reiceving a message
-	go func(conn *net.UDPConn) {
+	go func(peerManager *internal.PeerManager) {
 		chatLog, _ := chatHistory.Get()
 		timestamp := time.Now().Format("2006/01/02 15:04:05")
 		newLog := chatLog + timestamp + " System: Now Listening on Port " + globalPort + "\n"
@@ -160,12 +150,12 @@ func main() {
 		for {
 			// Read for new messages
 			// This is a blocking function call, so it waits till a new message arrives at the port
-			size, addr, err := conn.ReadFromUDP(buf)
+			size, addr, err := peerManager.ReadConn(buf)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			msgType, message, err := internal.HandleIncomingPacket(conn, peerManager, addr, buf[:size])
+			msgType, message, err := internal.HandleIncomingPacket(peerManager, addr, buf[:size])
 
 			if msgType == internal.MsgTypeBroadcast || msgType == internal.MsgTypeUnicast {
 				// Print it to the chat widget
@@ -177,7 +167,7 @@ func main() {
 				chatHistory.Set(newLog)
 			}
 		}
-	}(conn)
+	}(peerManager)
 
 	window.SetContent(content)
 	window.Resize(fyne.NewSize(width, height))

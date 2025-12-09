@@ -2,6 +2,7 @@ package internal
 
 import (
 	"errors"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 type Status int
 
+const timeout = 30 * time.Second
 const (
 	Active Status = iota
 	Dead
@@ -18,6 +20,7 @@ const (
 type PeerManager struct {
 	peers []Peer
 	mu    sync.RWMutex
+	conn  *net.UDPConn
 }
 
 type Peer struct {
@@ -29,10 +32,19 @@ type Peer struct {
 
 type Peers []Peer
 
-func NewPeerManager() *PeerManager {
+func NewPeerManager(port string) *PeerManager {
+	addr, err := net.ResolveUDPAddr("udp", port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
 	return &PeerManager{
 		peers: []Peer{},
 		mu:    sync.RWMutex{},
+		conn:  conn,
 	}
 }
 
@@ -78,13 +90,23 @@ func (p Peer) SendMessage(conn *net.UDPConn, payload []byte) error {
 	return err
 }
 
-// Sends the message to all known and active peers using the specified socket.
-func (pm *PeerManager) Broadcast(conn *net.UDPConn, payload []byte) error {
+// Sends the message to all known and active peers using the pm socket.
+// This is thread safe and can be safely called externaly
+func (pm *PeerManager) Broadcast(payload []byte) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	var err error = nil
+
+	err := pm.broadcastInternal(payload)
+
+	return err
+}
+
+// Sends the message to all known and active peers.
+// This is NOT thread safe and needs to be protected manually
+func (pm *PeerManager) broadcastInternal(payload []byte) error {
+	var err error
 	for _, peer := range pm.peers {
-		err = peer.SendMessage(conn, payload)
+		err = peer.SendMessage(pm.conn, payload)
 	}
 
 	return err
@@ -112,6 +134,7 @@ func (pm *PeerManager) UpdateLastSeenAll() {
 	defer pm.mu.Unlock()
 	for _, peer := range pm.peers {
 		peer.lastSeen = time.Now()
+		peer.status = Active
 	}
 }
 
@@ -123,18 +146,50 @@ func (pm *PeerManager) UpdatePeer(addr *net.UDPAddr) {
 	for _, peer := range pm.peers {
 		if peer.addr.IP.Equal(addr.IP) {
 			peer.lastSeen = time.Now()
+			peer.status = Active
 		}
 	}
 }
 
-func (pm *PeerManager) CheckAll(conn *net.UDPConn) {
-	now := time.Now()
-	// TODO: Subtract 30 Seconds
+func (pm *PeerManager) StartHeartbeatLoop() {
+	ticker := time.NewTicker(5 * time.Second)
 
+	go func() {
+		for range ticker.C {
+			pm.mu.Lock()
+
+			// Remove inactive peers
+			pm.removeInactive()
+
+			// Send ping to all known active peers
+			pingMsg := CreatePing()
+			err := pm.broadcastInternal(pingMsg)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			pm.mu.Unlock()
+		}
+	}()
+}
+
+func (pm *PeerManager) removeInactive() {
+	activePeers := (pm.peers)[:0]
 	for _, peer := range pm.peers {
-		// Peer needs to be declared dead and removed from peerList
-		if peer.lastSeen.Before(now) {
-			peer.status = Dead
+		if time.Since(peer.lastSeen) < timeout {
+			activePeers = append(activePeers, peer)
 		}
 	}
+
+	pm.peers = activePeers
+}
+
+func (pm *PeerManager) CloseSocket() {
+	pm.conn.Close()
+}
+
+func (pm *PeerManager) ReadConn(buffer []byte) (int, *net.UDPAddr, error) {
+	size, addr, err := pm.conn.ReadFromUDP(buffer)
+
+	return size, addr, err
 }

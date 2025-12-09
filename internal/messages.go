@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"log"
 	"net"
 )
 
@@ -18,7 +19,7 @@ const (
 // data: the byte slice of data received
 //
 // It returns the msgType, the content of the message and any errors
-func HandleIncomingPacket(conn *net.UDPConn, pm *PeerManager, addr *net.UDPAddr, data []byte) (byte, string, error) {
+func HandleIncomingPacket(pm *PeerManager, addr *net.UDPAddr, data []byte) (byte, string, error) {
 	if len(data) < 1 {
 		return EmptyPacket, "", nil // 99 indicating empty packet
 	}
@@ -31,7 +32,14 @@ func HandleIncomingPacket(conn *net.UDPConn, pm *PeerManager, addr *net.UDPAddr,
 
 	switch msgType {
 	case MsgTypeHeartbeat:
-		// TODO: Handle heartbeat
+		// Defines incoming Ping
+		if content[0] == 0x00 {
+			log.Printf("%s has sent a Ping:%s\n", addr.String(), string(content))
+			pong := CreatePong()
+			pm.conn.WriteToUDP(pong, addr)
+		} else { // must be an incoming Pong (0x01)
+			log.Printf("%s returned Pong :yey: %s\n", addr.String(), string(content))
+		}
 	case MsgTypeUnicast:
 		return MsgTypeUnicast, string(content), nil
 	case MsgTypeBroadcast:
@@ -60,8 +68,4 @@ func CreatePing() []byte {
 
 func CreatePong() []byte {
 	return []byte{0x00, 0x01}
-}
-
-func HandleHeartbeat(message []byte) {
-
 }
