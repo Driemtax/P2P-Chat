@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"sync"
 	"time"
 
 	"chat-client/internal"
@@ -31,10 +30,7 @@ const height = 600
 func main() {
 	printWelcome()
 	globalPort, _ := parseCMD()
-	peers := &internal.Peers{}
-
-	// Mutex to protect the peers list from concurrent access (UI vs Send routine)
-	var peersMutex sync.Mutex
+	peerManager := internal.NewPeerManager()
 
 	// We open a global port for sending and receiving messages. This is a threadsafe operation.
 	addr, err := net.ResolveUDPAddr("udp", globalPort)
@@ -105,10 +101,7 @@ func main() {
 				},
 				func(submitted bool) {
 					if submitted && peerEntry.Text != "" {
-						// Lock before modifying peers
-						peersMutex.Lock()
-						err := peers.Add(peerEntry.Text, aliasEntry.Text)
-						peersMutex.Unlock()
+						err := peerManager.Add(peerEntry.Text, aliasEntry.Text)
 
 						if err != nil {
 							dialog.ShowError(err, window)
@@ -138,15 +131,13 @@ func main() {
 	)
 
 	// GO routine for sending a message
-	go func(peers *internal.Peers, conn *net.UDPConn) {
+	go func(peers *internal.PeerManager, conn *net.UDPConn) {
 		defer conn.Close()
 		for msg := range sendChan {
 			// add the header to the message
 			payload := internal.PrepareMessage(internal.MsgTypeBroadcast, msg)
 			// directly send the message as a byte array via udp
-			peersMutex.Lock()
-			err = peers.Broadcast(conn, payload)
-			peersMutex.Unlock()
+			err = peerManager.Broadcast(conn, payload)
 			if err != nil {
 				timestamp := time.Now().Format("2006/01/02 15:04:05")
 				chatLog, _ := chatHistory.Get()
@@ -156,7 +147,7 @@ func main() {
 				log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
 			}
 		}
-	}(peers, conn)
+	}(peerManager, conn)
 
 	// GO routine for reiceving a message
 	go func(conn *net.UDPConn) {
@@ -174,15 +165,13 @@ func main() {
 				log.Fatal(err)
 			}
 
-			msgType, message, err := internal.HandleIncomingPacket(conn, peers, addr, buf[:size])
+			msgType, message, err := internal.HandleIncomingPacket(conn, peerManager, addr, buf[:size])
 
 			if msgType == internal.MsgTypeBroadcast || msgType == internal.MsgTypeUnicast {
 				// Print it to the chat widget
 				chatLog, _ = chatHistory.Get()
 				timestamp = time.Now().Format("2006/01/02 15:04:05")
-				peersMutex.Lock()
-				alias := peers.GetAlias(addr)
-				peersMutex.Unlock()
+				alias := peerManager.GetAlias(addr)
 				msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, alias, string(message))
 				newLog := chatLog + msg
 				chatHistory.Set(newLog)

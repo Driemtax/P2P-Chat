@@ -8,6 +8,7 @@ const (
 	MsgTypeHeartbeat = 0x00
 	MsgTypeUnicast   = 0x01
 	MsgTypeBroadcast = 0x02
+	EmptyPacket      = 0x63 // Hex 63 = 99 int
 )
 
 // HandelIncomingPacket handels all incoming packets. It decides what to do based on the message type. It needs:
@@ -17,14 +18,13 @@ const (
 // data: the byte slice of data received
 //
 // It returns the msgType, the content of the message and any errors
-func HandleIncomingPacket(conn *net.UDPConn, peers *Peers, addr *net.UDPAddr, data []byte) (byte, string, error) {
+func HandleIncomingPacket(conn *net.UDPConn, pm *PeerManager, addr *net.UDPAddr, data []byte) (byte, string, error) {
 	if len(data) < 1 {
-		return 99, "", nil // 99 indicating empty packet
+		return EmptyPacket, "", nil // 99 indicating empty packet
 	}
 
-	// First update the peer lastSeen time, since the peer is still active
-	// if we receive a msg
-	// TODO: Update lastSeen of Peer
+	// First update the peer lastSeen time, since the peer is still active if we receive a msg
+	pm.UpdatePeer(addr)
 
 	msgType := data[0]
 	content := data[1:]
