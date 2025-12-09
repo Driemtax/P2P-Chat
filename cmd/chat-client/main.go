@@ -4,8 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
-	"sync"
 	"time"
 
 	"chat-client/internal"
@@ -20,7 +18,7 @@ import (
 )
 
 // Protocol config
-const maxBuffSize = 128
+const maxBuffSize = 1024
 
 var globalPort string = "9000"
 
@@ -31,20 +29,8 @@ const height = 600
 func main() {
 	printWelcome()
 	globalPort, _ := parseCMD()
-	peers := &internal.Peers{}
-
-	// Mutex to protect the peers list from concurrent access (UI vs Send routine)
-	var peersMutex sync.Mutex
-
-	// We open a global port for sending and receiving messages. This is a threadsafe operation.
-	addr, err := net.ResolveUDPAddr("udp", globalPort)
-	if err != nil {
-		log.Fatal(err)
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatal(err)
-	}
+	peerManager := internal.NewPeerManager(globalPort)
+	peerManager.StartHeartbeatLoop()
 
 	a := app.New()
 	window := a.NewWindow("Chat 3000")
@@ -105,10 +91,7 @@ func main() {
 				},
 				func(submitted bool) {
 					if submitted && peerEntry.Text != "" {
-						// Lock before modifying peers
-						peersMutex.Lock()
-						err := peers.Add(peerEntry.Text, aliasEntry.Text)
-						peersMutex.Unlock()
+						err := peerManager.Add(peerEntry.Text, aliasEntry.Text)
 
 						if err != nil {
 							dialog.ShowError(err, window)
@@ -138,15 +121,13 @@ func main() {
 	)
 
 	// GO routine for sending a message
-	go func(peers *internal.Peers, conn *net.UDPConn) {
-		defer conn.Close()
+	go func(peerManager *internal.PeerManager) {
+		defer peerManager.CloseSocket()
 		for msg := range sendChan {
 			// add the header to the message
 			payload := internal.PrepareMessage(internal.MsgTypeBroadcast, msg)
 			// directly send the message as a byte array via udp
-			peersMutex.Lock()
-			err = peers.Broadcast(conn, payload)
-			peersMutex.Unlock()
+			err := peerManager.Broadcast(payload)
 			if err != nil {
 				timestamp := time.Now().Format("2006/01/02 15:04:05")
 				chatLog, _ := chatHistory.Get()
@@ -156,10 +137,10 @@ func main() {
 				log.Printf("\033[31m[Fehler]: Konnte Nachricht nicht senden (Empfänger offline?): %v\033[0m", err)
 			}
 		}
-	}(peers, conn)
+	}(peerManager)
 
 	// GO routine for reiceving a message
-	go func(conn *net.UDPConn) {
+	go func(peerManager *internal.PeerManager) {
 		chatLog, _ := chatHistory.Get()
 		timestamp := time.Now().Format("2006/01/02 15:04:05")
 		newLog := chatLog + timestamp + " System: Now Listening on Port " + globalPort + "\n"
@@ -169,26 +150,24 @@ func main() {
 		for {
 			// Read for new messages
 			// This is a blocking function call, so it waits till a new message arrives at the port
-			size, addr, err := conn.ReadFromUDP(buf)
+			size, addr, err := peerManager.ReadConn(buf)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			msgType, message := internal.ParseMessage(buf[:size])
+			msgType, message, err := internal.HandleIncomingPacket(peerManager, addr, buf[:size])
 
-			if msgType == internal.MsgTypeBroadcast {
+			if msgType == internal.MsgTypeBroadcast || msgType == internal.MsgTypeUnicast {
 				// Print it to the chat widget
 				chatLog, _ = chatHistory.Get()
 				timestamp = time.Now().Format("2006/01/02 15:04:05")
-				peersMutex.Lock()
-				alias := peers.GetAlias(addr)
-				peersMutex.Unlock()
+				alias := peerManager.GetAlias(addr)
 				msg := fmt.Sprintf("\n%s %s: %s\n", timestamp, alias, string(message))
 				newLog := chatLog + msg
 				chatHistory.Set(newLog)
 			}
 		}
-	}(conn)
+	}(peerManager)
 
 	window.SetContent(content)
 	window.Resize(fyne.NewSize(width, height))
@@ -214,7 +193,7 @@ func printWelcome() {
 func parseCMD() (string, string) {
 	port := flag.String("port", "9000", "the port you want to listen on..")
 	peer := flag.String("peer", "localhost:3000", "full remote address of the peer you want to connect to. <IP>:<PORT>")
-	bind := flag.String("bind", "127.0.0.1", "IP-Adrress you want to bind to (for local testing)")
+	bind := flag.String("bind", "", "IP-Adrress you want to bind to (for local testing)")
 
 	flag.Parse()
 	bindAddress := ":" + *port

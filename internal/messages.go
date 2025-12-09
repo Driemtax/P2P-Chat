@@ -1,28 +1,52 @@
 package internal
 
-import "slices"
+import (
+	"log"
+	"net"
+)
 
 const (
 	MsgTypeHeartbeat = 0x00
 	MsgTypeUnicast   = 0x01
 	MsgTypeBroadcast = 0x02
+	EmptyPacket      = 0x63 // Hex 63 = 99 int
 )
 
-func HandleMesage(message []byte) (int, string) {
-	var msgType int
-	switch message[0] {
-	case 0x00:
-		msgType = MsgTypeHeartbeat
-		// TODO: Handle heartbeat
-	case 0x01:
-		msgType = MsgTypeUnicast
-		// TODO: Handle Unicast
-	case 0x02:
-		msgType = MsgTypeBroadcast
-		// TODO: Handle Broadcast
+// HandelIncomingPacket handels all incoming packets. It decides what to do based on the message type. It needs:
+// conn: The Port for sending messages
+// peers: The list of all known active peers
+// addr: The address the messsage was sent from
+// data: the byte slice of data received
+//
+// It returns the msgType, the content of the message and any errors
+func HandleIncomingPacket(pm *PeerManager, addr *net.UDPAddr, data []byte) (byte, string, error) {
+	if len(data) < 1 {
+		return EmptyPacket, "", nil // 99 indicating empty packet
 	}
 
-	return msgType, ""
+	// First update the peer lastSeen time, since the peer is still active if we receive a msg
+	pm.UpdatePeer(addr)
+
+	msgType := data[0]
+	content := data[1:]
+
+	switch msgType {
+	case MsgTypeHeartbeat:
+		// Defines incoming Ping
+		if content[0] == 0x00 {
+			log.Printf("%s has sent a Ping:%s\n", addr.String(), string(content))
+			pong := CreatePong()
+			pm.conn.WriteToUDP(pong, addr)
+		} else { // must be an incoming Pong (0x01)
+			log.Printf("%s returned Pong :yey: %s\n", addr.String(), string(content))
+		}
+	case MsgTypeUnicast:
+		return MsgTypeUnicast, string(content), nil
+	case MsgTypeBroadcast:
+		return MsgTypeBroadcast, string(content), nil
+	}
+
+	return msgType, string(content), nil
 }
 
 func ParseMessage(data []byte) (byte, []byte) {
@@ -44,22 +68,4 @@ func CreatePing() []byte {
 
 func CreatePong() []byte {
 	return []byte{0x00, 0x01}
-}
-
-func CreateUnicast(message string) []byte {
-	header := []byte{0x01}
-	content := []byte(message)
-	payload := slices.Concat(header, content)
-	return payload
-}
-
-func CreateBroadcast(message string) []byte {
-	header := []byte{0x02}
-	content := []byte(message)
-	payload := slices.Concat(header, content)
-	return payload
-}
-
-func HandleHeartbeat(message []byte) {
-
 }
