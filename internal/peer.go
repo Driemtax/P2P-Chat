@@ -143,10 +143,11 @@ func (pm *PeerManager) UpdateLastSeenAll() {
 func (pm *PeerManager) UpdatePeer(addr *net.UDPAddr) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	for _, peer := range pm.peers {
+	for i, peer := range pm.peers {
+		log.Println("IP:", peer.addr.IP)
 		if peer.addr.IP.Equal(addr.IP) {
-			peer.lastSeen = time.Now()
-			peer.status = Active
+			pm.peers[i].lastSeen = time.Now()
+			pm.peers[i].status = Active
 		}
 	}
 }
@@ -178,6 +179,8 @@ func (pm *PeerManager) removeInactive() {
 	for _, peer := range pm.peers {
 		if time.Since(peer.lastSeen) < timeout {
 			activePeers = append(activePeers, peer)
+		} else {
+			log.Printf("Dropped: %s cause %s\n", peer.addr.String(), time.Since(peer.lastSeen).String())
 		}
 	}
 
@@ -192,4 +195,27 @@ func (pm *PeerManager) ReadConn(buffer []byte) (int, *net.UDPAddr, error) {
 	size, addr, err := pm.conn.ReadFromUDP(buffer)
 
 	return size, addr, err
+}
+
+// Checks if a peer is known. Adds the peer to the list of active known peers if not known yet. Does nothing if the peer is known.
+func (pm *PeerManager) CheckIfPeerIsKnown(addr *net.UDPAddr) bool {
+	isKnown := false
+	pm.mu.RLock()
+
+	for _, peer := range pm.peers {
+		if peer.addr.IP.Equal(addr.IP) {
+			isKnown = true
+		}
+	}
+
+	pm.mu.RUnlock()
+
+	if !isKnown {
+		err := pm.Add(addr.String(), "")
+		if err != nil {
+			log.Println("Could not add new Peer:", err.Error())
+		}
+	}
+
+	return isKnown
 }

@@ -13,8 +13,7 @@ const (
 )
 
 // HandelIncomingPacket handels all incoming packets. It decides what to do based on the message type. It needs:
-// conn: The Port for sending messages
-// peers: The list of all known active peers
+// pm: the peerManager holding the socket and peer list
 // addr: The address the messsage was sent from
 // data: the byte slice of data received
 //
@@ -33,6 +32,11 @@ func HandleIncomingPacket(pm *PeerManager, addr *net.UDPAddr, data []byte) (byte
 	switch msgType {
 	case MsgTypeHeartbeat:
 		// Defines incoming Ping
+		// TODO: Check if peer is known, add otherwise
+		isKnown := pm.CheckIfPeerIsKnown(addr)
+		if !isKnown {
+			log.Println("New Peer added:", addr.String())
+		}
 		if content[0] == 0x00 {
 			log.Printf("%s has sent a Ping:%s\n", addr.String(), string(content))
 			pong := CreatePong()
