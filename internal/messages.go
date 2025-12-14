@@ -31,8 +31,11 @@ func HandleIncomingPacket(pm *PeerManager, addr *net.UDPAddr, data []byte) (byte
 
 	switch msgType {
 	case MsgTypeHeartbeat:
-		// Defines incoming Ping
-		// TODO: Check if peer is known, add otherwise
+		if len(content) > 1 && content[1] == 0xAC && content[2] == 0xAB {
+			log.Println("Reveived own message from broadcast")
+			return EmptyPacket, "", nil
+		}
+		// Check if peer is known, add otherwise
 		isKnown := pm.CheckIfPeerIsKnown(addr)
 		if !isKnown {
 			log.Println("New Peer added:", addr.String())

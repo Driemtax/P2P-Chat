@@ -3,19 +3,19 @@ package ui
 import (
 	"chat-client/internal"
 	"chat-client/internal/config"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
 // UI model
 type PeerData struct {
+	ID    uint
 	IP    string
 	Alias string
 }
@@ -25,9 +25,14 @@ type ChatUI struct {
 	Window      fyne.Window
 	PeerManager *internal.PeerManager
 
-	Peers             []PeerData // copy of peers to not have to use mutex. Is this a good idea??
+	// --- DATA ---
+	Peers      []PeerData // copy of peers to not have to use mutex. Is this a good idea??
+	peersMutex sync.RWMutex
+
+	// --- VIEW ---
 	snackbarContainer *fyne.Container
 	ChatHistory       binding.String
+	PeerList          *widget.List
 
 	// channels
 	SendChan chan string
@@ -93,44 +98,44 @@ func (ui *ChatUI) setupContent() {
 	inputArea := container.NewVBox(input, sendBtn)
 
 	// TODO Sidebar here
-	// sidebar := widget.NewLabel("Sidebar Placeholder")
+	sidebar := ui.makeSidebar()
 	// Toolbar for adding peers
-	toolbar := widget.NewToolbar(
-		widget.NewToolbarAction(theme.ContentAddIcon(), func() {
-			// Create input field for the dialog
-			peerEntry := widget.NewEntry()
-			peerEntry.PlaceHolder = "127.0.0.1:3000"
-			aliasEntry := widget.NewEntry()
-			aliasEntry.PlaceHolder = "Gib einen Nickname ein.."
+	// toolbar := widget.NewToolbar(
+	// 	widget.NewToolbarAction(theme.ContentAddIcon(), func() {
+	// 		// Create input field for the dialog
+	// 		peerEntry := widget.NewEntry()
+	// 		peerEntry.PlaceHolder = "127.0.0.1:3000"
+	// 		aliasEntry := widget.NewEntry()
+	// 		aliasEntry.PlaceHolder = "Gib einen Nickname ein.."
 
-			// SHow a form dialog
-			dialog.ShowForm("Neuen Peer hinzufügen", "Hinzufügen", "Abbrechen",
-				[]*widget.FormItem{
-					widget.NewFormItem("Adresse", peerEntry),
-					widget.NewFormItem("Nickname", aliasEntry),
-				},
-				func(submitted bool) {
-					if submitted && peerEntry.Text != "" {
-						err := ui.PeerManager.Add(peerEntry.Text, aliasEntry.Text)
+	// 		// SHow a form dialog
+	// 		dialog.ShowForm("Neuen Peer hinzufügen", "Hinzufügen", "Abbrechen",
+	// 			[]*widget.FormItem{
+	// 				widget.NewFormItem("Adresse", peerEntry),
+	// 				widget.NewFormItem("Nickname", aliasEntry),
+	// 			},
+	// 			func(submitted bool) {
+	// 				if submitted && peerEntry.Text != "" {
+	// 					err := ui.PeerManager.Add(peerEntry.Text, aliasEntry.Text)
 
-						if err != nil {
-							dialog.ShowError(err, ui.Window)
-						} else {
-							// Log success to chat
-							timestamp := time.Now().Format("2006/01/02 15:04:05")
-							chatLog, _ := ui.ChatHistory.Get()
-							ui.ChatHistory.Set(chatLog + "\n" + timestamp + " [System]: Peer " + peerEntry.Text + " hinzugefügt.\n")
-						}
-					}
-				}, ui.Window)
-		}),
-	)
+	// 					if err != nil {
+	// 						dialog.ShowError(err, ui.Window)
+	// 					} else {
+	// 						// Log success to chat
+	// 						timestamp := time.Now().Format("2006/01/02 15:04:05")
+	// 						chatLog, _ := ui.ChatHistory.Get()
+	// 						ui.ChatHistory.Set(chatLog + "\n" + timestamp + " [System]: Peer " + peerEntry.Text + " hinzugefügt.\n")
+	// 					}
+	// 				}
+	// 			}, ui.Window)
+	// 	}),
+	// )
 
 	// Layout of all components
 	// HSplit for Sidebar | Chat
 	chatContainer := container.NewBorder(nil, inputArea, nil, nil, scrollContainer)
 
-	split := container.NewHSplit(toolbar, chatContainer)
+	split := container.NewHSplit(sidebar, chatContainer)
 	split.SetOffset(0.3) // 30% sidebar, adjust maybe
 
 	ui.Window.SetContent(split)
@@ -145,4 +150,28 @@ func (ui *ChatUI) setupContent() {
 		ui.Window.Canvas().Focus(input)
 	})
 
+}
+
+func (ui *ChatUI) UpdatePeerList(newPeers []internal.Peer) {
+	uiData := make([]PeerData, len(newPeers))
+	for i, p := range newPeers {
+		ip := "Unknown"
+		if p.Addr != nil {
+			ip = p.Addr.String()
+		}
+		uiData[i] = PeerData{
+			ID:    p.ID,
+			IP:    ip,
+			Alias: p.Alias,
+		}
+	}
+
+	ui.peersMutex.Lock()
+	ui.Peers = uiData
+	ui.peersMutex.Unlock()
+
+	// NotifyUI to render changes
+	if ui.PeerList != nil {
+		ui.PeerList.Refresh()
+	}
 }

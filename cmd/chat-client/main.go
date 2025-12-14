@@ -23,9 +23,13 @@ func main() {
 	printWelcome()
 	globalPort, _ := parseCMD()
 	peerManager := internal.NewPeerManager(globalPort)
-	peerManager.StartHeartbeatLoop()
 
 	chatUi := ui.NewChatUI(peerManager)
+
+	peerManager.OnPeerListUpdated = func(peers []internal.Peer) {
+		chatUi.UpdatePeerList(peers)
+	}
+	peerManager.StartHeartbeatLoop()
 
 	// GO routine for sending a message
 	go func(chatUI *ui.ChatUI) {
