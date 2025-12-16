@@ -17,17 +17,23 @@ const (
 	Unknown
 )
 
+var peerCounter uint = 0
+
 type PeerManager struct {
 	peers []Peer
 	mu    sync.RWMutex
 	conn  *net.UDPConn
+
+	// Callback for updating UI
+	OnPeerListUpdated func([]Peer)
 }
 
 type Peer struct {
-	addr     *net.UDPAddr
-	alias    string
-	status   Status
-	lastSeen time.Time
+	ID       uint
+	Addr     *net.UDPAddr
+	Alias    string
+	Status   Status
+	LastSeen time.Time
 }
 
 type Peers []Peer
@@ -49,11 +55,13 @@ func NewPeerManager(port string) *PeerManager {
 }
 
 func NewPeer(address *net.UDPAddr, alias string, status Status) *Peer {
+	peerCounter++
 	return &Peer{
-		addr:     address,
-		alias:    alias,
-		status:   status,
-		lastSeen: time.Now(),
+		ID:       peerCounter,
+		Addr:     address,
+		Alias:    alias,
+		Status:   status,
+		LastSeen: time.Now(),
 	}
 }
 
@@ -75,6 +83,7 @@ func (pm *PeerManager) Add(peer string, alias string) error {
 	defer pm.mu.Unlock()
 	newPeer := NewPeer(addr, alias, Active)
 	pm.peers = append(pm.peers, *newPeer)
+	pm.notifyUI()
 
 	return nil
 }
@@ -83,8 +92,8 @@ func (pm *PeerManager) Add(peer string, alias string) error {
 func (p Peer) SendMessage(conn *net.UDPConn, payload []byte) error {
 	var err error = nil
 
-	if p.status == Active {
-		_, err = conn.WriteToUDP(payload, p.addr)
+	if p.Status == Active {
+		_, err = conn.WriteToUDP(payload, p.Addr)
 	}
 
 	return err
@@ -119,12 +128,25 @@ func (pm *PeerManager) GetAlias(addr *net.UDPAddr) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	for _, peer := range pm.peers {
-		if peer.addr.IP.Equal(addr.IP) {
-			alias = peer.alias
+		if peer.Addr.IP.Equal(addr.IP) {
+			alias = peer.Alias
 		}
 	}
 
 	return alias
+}
+
+// Updates the alias on the specified peer
+func (pm *PeerManager) SetAlias(Id uint, updatedAlias string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	for i, p := range pm.peers {
+		if p.ID == Id {
+			pm.peers[i].Alias = updatedAlias
+		}
+	}
+
+	pm.notifyUI()
 }
 
 // Updates the lastSeen field of all known peers
@@ -133,8 +155,8 @@ func (pm *PeerManager) UpdateLastSeenAll() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	for _, peer := range pm.peers {
-		peer.lastSeen = time.Now()
-		peer.status = Active
+		peer.LastSeen = time.Now()
+		peer.Status = Active
 	}
 }
 
@@ -144,10 +166,10 @@ func (pm *PeerManager) UpdatePeer(addr *net.UDPAddr) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	for i, peer := range pm.peers {
-		log.Println("IP:", peer.addr.IP)
-		if peer.addr.IP.Equal(addr.IP) {
-			pm.peers[i].lastSeen = time.Now()
-			pm.peers[i].status = Active
+		log.Println("IP:", peer.Addr.IP)
+		if peer.Addr.IP.Equal(addr.IP) {
+			pm.peers[i].LastSeen = time.Now()
+			pm.peers[i].Status = Active
 		}
 	}
 }
@@ -160,7 +182,7 @@ func (pm *PeerManager) StartHeartbeatLoop() {
 			pm.mu.Lock()
 
 			// Remove inactive peers
-			pm.removeInactive()
+			changed := pm.removeInactive()
 
 			// Send ping to all known active peers
 			pingMsg := CreatePing()
@@ -168,23 +190,30 @@ func (pm *PeerManager) StartHeartbeatLoop() {
 			if err != nil {
 				log.Fatal(err)
 			}
-
 			pm.mu.Unlock()
+
+			// Update UI if we dropped a peer
+			if changed {
+				pm.notifyUI()
+			}
 		}
 	}()
 }
 
-func (pm *PeerManager) removeInactive() {
+func (pm *PeerManager) removeInactive() bool {
 	activePeers := (pm.peers)[:0]
+	changed := false
 	for _, peer := range pm.peers {
-		if time.Since(peer.lastSeen) < timeout {
+		if time.Since(peer.LastSeen) < timeout {
 			activePeers = append(activePeers, peer)
 		} else {
-			log.Printf("Dropped: %s cause %s\n", peer.addr.String(), time.Since(peer.lastSeen).String())
+			log.Printf("Dropped: %s cause %s\n", peer.Addr.String(), time.Since(peer.LastSeen).String())
+			changed = true
 		}
 	}
 
 	pm.peers = activePeers
+	return changed
 }
 
 func (pm *PeerManager) CloseSocket() {
@@ -203,7 +232,7 @@ func (pm *PeerManager) CheckIfPeerIsKnown(addr *net.UDPAddr) bool {
 	pm.mu.RLock()
 
 	for _, peer := range pm.peers {
-		if peer.addr.IP.Equal(addr.IP) {
+		if peer.Addr.IP.Equal(addr.IP) {
 			isKnown = true
 		}
 	}
@@ -218,4 +247,31 @@ func (pm *PeerManager) CheckIfPeerIsKnown(addr *net.UDPAddr) bool {
 	}
 
 	return isKnown
+}
+
+// Sends a ping via broadcast to everyone in the network. When they answer with pong we have found a new client
+// and it will be added to the known active peers
+func (pm *PeerManager) ScanNetwork() {
+	msg := CreatePing()
+	msg = append(msg, 0xAC, 0xAB) // This will be used to identify my own message so i dont add myself to peers
+	target := "255.255.255.255:9000"
+
+	addr, err := net.ResolveUDPAddr("udp", target)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	pm.conn.WriteToUDP(msg, addr)
+
+}
+
+func (pm *PeerManager) notifyUI() {
+	if pm.OnPeerListUpdated != nil {
+		// We create a copy here for preventing race conditions
+		// We dont need a mutex lock though, because when this is called we will already be locked.
+		peersCopy := make([]Peer, len(pm.peers))
+		copy(peersCopy, pm.peers)
+
+		go pm.OnPeerListUpdated(peersCopy)
+	}
 }
